@@ -2268,6 +2268,64 @@ fn test_get_verification_status_distinguishes_pending_from_unregistered() {
     );
 }
 
+// The state-transition table in docs/THREAT_MODEL.md ("Registry Profile
+// States and Transitions") is the documented contract for how a profile
+// moves between Pending, Verified and Revoked. This test walks every
+// documented transition — including the two documented no-ops — so the
+// table cannot silently drift from the code (#995).
+#[test]
+fn test_documented_verification_state_transitions() {
+    let (env, client) = setup();
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+    let issuer = Address::generate(&env);
+    let metadata = map![&env];
+
+    // Unregistered -> Pending on self-authenticated registration.
+    client.register_issuer(&issuer, &metadata);
+    assert_eq!(
+        client.get_verification_status(&issuer),
+        VerificationStatus::Pending
+    );
+
+    // Pending -> Verified via verify_profile(_, true) (admin or verifier).
+    client.verify_profile(&admin, &issuer, &true);
+    assert_eq!(
+        client.get_verification_status(&issuer),
+        VerificationStatus::Verified
+    );
+
+    // Verified -> Revoked via the admin-only revoke.
+    client.revoke(&issuer);
+    assert_eq!(
+        client.get_verification_status(&issuer),
+        VerificationStatus::Revoked
+    );
+
+    // Revoked -> Verified via the admin-only reinstate.
+    client.reinstate(&issuer);
+    assert_eq!(
+        client.get_verification_status(&issuer),
+        VerificationStatus::Verified
+    );
+
+    // revoke is a documented no-op on a never-verified (Pending) profile.
+    let pending = Address::generate(&env);
+    client.register_buyer(&pending, &metadata);
+    client.revoke(&pending);
+    assert_eq!(
+        client.get_verification_status(&pending),
+        VerificationStatus::Pending
+    );
+
+    // Pending -> Revoked via verify_profile(_, false) (admin or verifier).
+    client.verify_profile(&admin, &pending, &false);
+    assert_eq!(
+        client.get_verification_status(&pending),
+        VerificationStatus::Revoked
+    );
+}
+
 // ============== GET_ROLE VIEW TESTS (#609) ==============
 
 #[test]
